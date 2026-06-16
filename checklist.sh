@@ -17,11 +17,21 @@ print_usage() {
   ./checklist.sh [all|host|instances|global]
 
 说明:
-  all        同时展示宿主机 cgroup 视角和实例内进程视角
-  host       只看宿主机 cgroup 视角
-  instances  只看实例内进程视角（依赖 incus exec；VM 需要 incus-agent）
-  global     全局进程视图，统计进程出现次数和分布实例数
+  all        同时展示宿主机 cgroup 视角和按容器分类视角
+  host       只看宿主机全局视角
+  instances  只看按容器分类视角
+  global     全局进程视图，统计过滤后的第三方进程出现次数
 EOF
+}
+
+collect_host_process_map() {
+    ps -eo pid,ppid,comm=,cgroup= | \
+    awk '$1 != 2 && $2 != 2 && $3 != "" {
+        cgroup=$4
+        for (i=5; i<=NF; i++) cgroup=cgroup " " $i
+        print $3 "|" cgroup
+    }' | \
+    grep -vE "^($PROCESS_IGNORE_REGEX)\|" || true
 }
 
 scan_host_cgroups() {
@@ -29,15 +39,7 @@ scan_host_cgroups() {
     echo "------------------------------------------------------"
 
     local host_summary
-    host_summary="$(
-        ps -eo pid,ppid,comm=,cgroup= | \
-        awk '$1 != 2 && $2 != 2 && $3 != "" {
-            cgroup=$4
-            for (i=5; i<=NF; i++) cgroup=cgroup " " $i
-            print $3 "|" cgroup
-        }' | \
-        grep -vE "^($PROCESS_IGNORE_REGEX)\|" || true
-    )"
+    host_summary="$(collect_host_process_map)"
 
     if [[ -z "$host_summary" ]]; then
         echo "未发现命中过滤后的业务进程。"
@@ -69,7 +71,7 @@ scan_host_cgroups() {
             if (last_node != "") print ""
 
             if (node == "0_Host") {
-                print "🖥️  [宿主机 (Host)]"
+                print "🖥️  [宿主机]"
             } else {
                 print "📦 [" node "]"
             }
@@ -82,101 +84,70 @@ scan_host_cgroups() {
 }
 
 scan_instance_processes() {
-    require_cmd "$INCUS_BIN"
-    require_cmd "$PYTHON_BIN"
-
-    local ps_snippet='
-if command -v ps >/dev/null 2>&1; then
-    ps -eo comm= 2>/dev/null || ps -A -o comm= 2>/dev/null || ps
-elif command -v busybox >/dev/null 2>&1; then
-    busybox ps | awk "NR > 1 { print \$5 }"
-else
-    exit 127
-fi
-'
-
-    mapfile -t running_instances < <(incus_running_instances_tsv)
-
-    echo "🔍 实例内视角: 通过 incus exec 统计实例中的业务进程"
+    echo "🔍 按容器分类视角: 从宿主机 cgroup 归属统计业务进程"
     echo "------------------------------------------------------"
 
-    if [[ ${#running_instances[@]} -eq 0 ]]; then
-        echo "没有发现 Running 状态的实例。"
+    local host_summary
+    host_summary="$(collect_host_process_map)"
+
+    if [[ -z "$host_summary" ]]; then
+        echo "未发现命中过滤后的业务进程。"
         echo "------------------------------------------------------"
         return
     fi
 
-    for row in "${running_instances[@]}"; do
-        IFS=$'\t' read -r instance_name instance_type <<<"$row"
-
-        if output="$(run_incus exec "$instance_name" --mode non-interactive -- sh -c "$ps_snippet" 2>/dev/null)"; then
-            printf '📦 [%s] (%s)\n' "$instance_name" "$instance_type"
-            if filtered="$(
-                printf '%s\n' "$output" | \
-                sed 's/^ *//; s/ *$//' | \
-                awk 'NF > 0 { print $0 }' | \
-                grep -vE "^($PROCESS_IGNORE_REGEX)$" || true
-            )" && [[ -n "$filtered" ]]; then
-                printf '%s\n' "$filtered" | \
-                sort | uniq -c | sort -nr | \
-                awk '{ count=$1; $1=""; sub(/^ /, ""); printf "   ├── %-20s : %d\n", $0, count }'
-            else
-                echo "   ├── 未发现命中过滤后的业务进程"
-            fi
-            echo
+    printf '%s\n' "$host_summary" | \
+    while IFS="|" read -r comm cgroup; do
+        if [[ "$cgroup" =~ incus\.payload\.([^/]+) ]]; then
+            node="${BASH_REMATCH[1]%.scope}"
+        elif [[ "$cgroup" =~ lxc\.payload\.([^/]+) ]]; then
+            node="${BASH_REMATCH[1]%.scope}"
         else
-            printf '📦 [%s] (%s)\n' "$instance_name" "$instance_type"
-            echo "   ├── 无法进入实例执行 ps"
-            echo "   ├── 容器通常可直接执行"
-            echo "   ├── VM 需要实例内 incus-agent 正常运行"
-            echo
+            continue
         fi
-    done
+        echo "${node}|${comm}"
+    done | \
+    awk -F'|' '{ count[$1 "|" $2]++ } END { for (key in count) print key "|" count[key] }' | \
+    sort -t'|' -k1,1 -k3,3nr | \
+    awk -F'|' '
+    BEGIN { last_node = "" }
+    {
+        node = $1
+        comm = $2
+        count = $3
+
+        if (node != last_node) {
+            if (last_node != "") print ""
+            print "📦 [" node "]"
+            last_node = node
+        }
+        printf "   ├── %-20s : %d\n", comm, count
+    }'
 
     echo "------------------------------------------------------"
+    echo "注: 这里完全基于宿主机 cgroup 归属统计，对容器内部无感。"
+    echo "注: VM 通常只能看到宿主机侧进程归属，未必能看到客体内全部真实进程。"
 }
 
 scan_global_processes() {
-    require_cmd "$INCUS_BIN"
-    require_cmd "$PYTHON_BIN"
-
-    local ps_snippet='
-if command -v ps >/dev/null 2>&1; then
-    ps -eo comm= 2>/dev/null || ps -A -o comm= 2>/dev/null || ps
-elif command -v busybox >/dev/null 2>&1; then
-    busybox ps | awk "NR > 1 { print \$5 }"
-else
-    exit 127
-fi
-'
+    echo "🔍 全局进程视图: 统计过滤后的第三方进程出现次数和分布容器数"
+    echo "------------------------------------------------------"
 
     local tmp_file
     tmp_file="$(mktemp)"
     trap 'rm -f "$tmp_file"' RETURN
 
-    echo "🔍 全局进程视图: 统计进程出现次数和分布实例"
-    echo "------------------------------------------------------"
-
-    mapfile -t running_instances < <(incus_running_instances_tsv)
-
-    local row instance_name instance_type output filtered
-    for row in "${running_instances[@]}"; do
-        IFS=$'\t' read -r instance_name instance_type <<<"$row"
-        if output="$(run_incus exec "$instance_name" --mode non-interactive -- sh -c "$ps_snippet" 2>/dev/null)"; then
-            filtered="$(
-                printf '%s\n' "$output" | \
-                sed 's/^ *//; s/ *$//' | \
-                awk 'NF > 0 { print $0 }' | \
-                grep -vE "^($PROCESS_IGNORE_REGEX)$" || true
-            )"
-            if [[ -n "$filtered" ]]; then
-                while IFS= read -r proc_name; do
-                    [[ -n "$proc_name" ]] || continue
-                    printf '%s\t%s\n' "$instance_name" "$proc_name" >> "$tmp_file"
-                done <<<"$filtered"
-            fi
+    collect_host_process_map | \
+    while IFS="|" read -r comm cgroup; do
+        if [[ "$cgroup" =~ incus\.payload\.([^/]+) ]]; then
+            node="${BASH_REMATCH[1]%.scope}"
+        elif [[ "$cgroup" =~ lxc\.payload\.([^/]+) ]]; then
+            node="${BASH_REMATCH[1]%.scope}"
+        else
+            continue
         fi
-    done
+        printf '%s\t%s\n' "$node" "$comm"
+    done > "$tmp_file"
 
     if [[ ! -s "$tmp_file" ]]; then
         echo "未发现命中过滤后的业务进程。"
@@ -206,7 +177,7 @@ fi
     ' "$tmp_file" | sort -t $'\t' -k2,2nr -k3,3nr | \
     awk -F'\t' '
         BEGIN {
-            printf "%-24s %-8s %-10s\n", "进程名", "次数", "实例数"
+            printf "%-24s %-8s %-10s\n", "进程名", "次数", "容器数"
             printf "%-24s %-8s %-10s\n", "------------------------", "--------", "----------"
         }
         {
