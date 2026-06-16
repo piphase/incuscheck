@@ -12,7 +12,13 @@
 - 支持来源/目标/CIDR/地区过滤
 - 支持当前进程审查
 
-### 快速开始
+说明：
+
+- `CIDR` 主要用来按网段排除来源或目标，例如 `10.0.0.0/8`、`192.168.0.0/16`。
+- `Incus project` 用来限定脚本只看某个 Incus 项目；留空时按当前默认项目工作。
+- 国家/地区筛选现在是“只统计哪些国家/地区”，例如默认值可以写 `CN`，填 `all` 表示全部统计。
+
+## 快速开始
 
 交互式菜单：
 
@@ -20,10 +26,45 @@
 bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh)
 ```
 
+使用默认参数直接安装/覆盖重装：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) install
+```
+
+直接卸载：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) uninstall
+```
+
+说明：
+
+- `install` 会按默认参数直接安装，也可以用于覆盖重装。
+- `uninstall` 会完整移除本工具自己的程序目录、配置、数据目录和 `systemd` 单元。
+
+## 主菜单
+
+1. 安装/重装自动 IP 记录
+2. 查看安装与运行状态
+3. 查看 IP 统计数据
+4. 进程审查
+5. 清理 IP 记录数据
+6. 修改配置
+99. 彻底卸载
+0. 退出
+
+补充子项：
+
+- `IP 统计数据` 里有 `来源 IP Top N`、`最近新增中国大陆来源` 等快捷入口。
+- `清理 IP 记录数据` 里支持按国家代码和按容器清理。
+
 ## 文件说明
 
 - `incuscheck.sh`
   - 交互式主菜单。
+- `install.sh`
+  - GitHub 一键拉取安装入口。
 - `conntrack-capture.sh`
   - 单次采集脚本，定时器实际调用它。
 - `conntrack-report.sh`
@@ -141,4 +182,3 @@ Linux 宿主机上至少需要：
 - 当前是“按天原始记录 + 查询时聚合”，还没有单独做日汇总压缩。
 - 进程审查目前是当前视图，不保留进程历史。
 - GeoIP 目前依赖宿主机已有数据库，没有内置下载器。
-

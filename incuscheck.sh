@@ -22,13 +22,39 @@ prompt() {
     local value
 
     if [[ -n "$default_value" ]]; then
-        read -r -p "$label [$default_value]: " value
+        read -r -p "$label [默认值：$default_value]: " value
         value="${value:-$default_value}"
     else
         read -r -p "$label: " value
     fi
 
     printf '%s' "$value"
+}
+
+direction_label() {
+    case "$1" in
+        all) printf '全部' ;;
+        ingress) printf '仅入站' ;;
+        egress) printf '仅出站' ;;
+        *) printf '%s' "$1" ;;
+    esac
+}
+
+direction_value_from_input() {
+    case "$(trim_spaces "$1")" in
+        全部|all|"")
+            printf 'all'
+            ;;
+        仅入站|入站|ingress)
+            printf 'ingress'
+            ;;
+        仅出站|出站|egress)
+            printf 'egress'
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 }
 
 pause_screen() {
@@ -171,19 +197,16 @@ install_or_reinstall() {
     CAPTURE_INTERVAL_MINUTES="$(prompt '采集间隔(分钟)' "$CAPTURE_INTERVAL_MINUTES")"
     [[ "$CAPTURE_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || die "采集间隔必须是数字"
 
-    CAPTURE_DIRECTION="$(trim_spaces "$(prompt '记录方向(all/ingress/egress)' "$CAPTURE_DIRECTION")")"
-    case "$CAPTURE_DIRECTION" in
-        all|ingress|egress) ;;
-        *) die "记录方向必须是 all/ingress/egress" ;;
-    esac
+    CAPTURE_DIRECTION="$(direction_value_from_input "$(prompt '记录方向(全部/仅入站/仅出站)' "$(direction_label "$CAPTURE_DIRECTION")")")" \
+        || die "记录方向必须填写 全部 / 仅入站 / 仅出站"
 
     RETENTION_DAYS="$(prompt '保留天数' "$RETENTION_DAYS")"
     [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "保留天数必须是数字"
 
     EXCLUDE_SRC_CIDRS="$(trim_spaces "$(prompt '排除来源 CIDR(逗号分隔，可留空)' "$EXCLUDE_SRC_CIDRS")")"
     EXCLUDE_DST_CIDRS="$(trim_spaces "$(prompt '排除目标 CIDR(逗号分隔，可留空)' "$EXCLUDE_DST_CIDRS")")"
-    EXCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '排除国家/地区代码(逗号分隔，可留空)' "$EXCLUDE_COUNTRY_CODES")")"
-    INCUS_PROJECT="$(trim_spaces "$(prompt 'Incus project(留空表示默认/全部可见范围)' "$INCUS_PROJECT")")"
+    INCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '只统计国家/地区代码(全统计请填写 all，例如 CN,US)' "$INCLUDE_COUNTRY_CODES")")"
+    INCUS_PROJECT="$(trim_spaces "$(prompt 'Incus 项目名(留空表示当前默认项目)' "$INCUS_PROJECT")")"
 
     perform_install
 }
@@ -316,7 +339,8 @@ show_ip_statistics() {
             ;;
         9)
             country_code="$(normalize_csv_list "$(prompt '输入国家/地区代码，例如 CN,US')")"
-            direction_input="$(prompt '方向(all/ingress/egress)' "all")"
+            direction_input="$(direction_value_from_input "$(prompt '方向(全部/仅入站/仅出站)' '全部')")" \
+                || die "方向必须填写 全部 / 仅入站 / 仅出站"
             INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --country "$country_code" --direction "$direction_input" --group-by src --limit 100
             ;;
         0)
@@ -440,10 +464,11 @@ modify_config() {
     echo "${BOLD}修改配置${RESET}"
 
     CAPTURE_INTERVAL_MINUTES="$(prompt '采集间隔(分钟)' "$CAPTURE_INTERVAL_MINUTES")"
-    CAPTURE_DIRECTION="$(trim_spaces "$(prompt '记录方向(all/ingress/egress)' "$CAPTURE_DIRECTION")")"
+    CAPTURE_DIRECTION="$(direction_value_from_input "$(prompt '记录方向(全部/仅入站/仅出站)' "$(direction_label "$CAPTURE_DIRECTION")")")" \
+        || die "记录方向必须填写 全部 / 仅入站 / 仅出站"
     EXCLUDE_SRC_CIDRS="$(trim_spaces "$(prompt '排除来源 CIDR' "$EXCLUDE_SRC_CIDRS")")"
     EXCLUDE_DST_CIDRS="$(trim_spaces "$(prompt '排除目标 CIDR' "$EXCLUDE_DST_CIDRS")")"
-    EXCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '排除国家/地区代码' "$EXCLUDE_COUNTRY_CODES")")"
+    INCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '只统计国家/地区代码(全统计请填写 all，例如 CN,US)' "$INCLUDE_COUNTRY_CODES")")"
     RETENTION_DAYS="$(prompt '保留天数' "$RETENTION_DAYS")"
     DEFAULT_REPORT_DAYS="$(prompt '默认统计天数' "$DEFAULT_REPORT_DAYS")"
     require_root

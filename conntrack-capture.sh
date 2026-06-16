@@ -139,10 +139,10 @@ append_row_if_allowed() {
     geoip_result="$(lookup_country_info "$remote_ip")"
     IFS=$'\t' read -r country_code country_name <<<"$geoip_result"
 
-    if [[ -n "$EXCLUDE_COUNTRY_CODES" ]]; then
-        local normalized_excludes
-        normalized_excludes="$(normalize_csv_list "$EXCLUDE_COUNTRY_CODES")"
-        if [[ ",$normalized_excludes," == *",$country_code,"* ]]; then
+    if [[ -n "$INCLUDE_COUNTRY_CODES" && "$(normalize_csv_list "$INCLUDE_COUNTRY_CODES")" != "ALL" ]]; then
+        local normalized_includes
+        normalized_includes="$(normalize_csv_list "$INCLUDE_COUNTRY_CODES")"
+        if [[ ",$normalized_includes," != *",$country_code,"* ]]; then
             return
         fi
     fi
