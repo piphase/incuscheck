@@ -1,44 +1,24 @@
 # incuscheck
 
-`incuscheck` 是一套面向 Incus 宿主机的交互式检查脚本，重点放在两件事上：
+`incuscheck` 是一套面向 Incus 宿主机的交互式审查脚本，主要包括：
 
 1. 定时记录容器/虚机的历史连接。
 2. 按容器或全局视角审查当前运行进程。
 
-这一版已经按“纯文件记录 + systemd 托管 + 交互式菜单”重构，不再依赖 SQLite。
-
-## 设计目标
+## 主要功能和特性
 
 - 支持一键安装/重装自动 IP 记录
-- 用 `systemd timer` 定时抓取 `conntrack`
 - 按容器归类历史连接
 - 支持来源/目标/CIDR/地区过滤
-- 支持“中国大陆入站来源”这种快捷审查视图
 - 支持当前进程审查
-- 支持完整卸载，但不动系统依赖和 Incus 自身配置
 
-## 主菜单
+### 快速开始
 
-运行 `./incuscheck.sh` 后会进入主菜单：
+交互式菜单：
 
-1. 安装/重装自动 IP 记录
-2. 查看安装与运行状态
-3. 查看 IP 统计数据
-4. 进程审查
-5. 清理 IP 记录数据
-6. 修改配置
-99. 彻底卸载
-0. 退出
-
-补充子项：
-
-- `IP 统计数据` 里有 `来源 IP Top N`、`最近新增中国大陆来源` 等快捷入口。
-- `清理 IP 记录数据` 里支持按国家代码和按容器清理。
-
-说明：
-
-- `99` 会以红色显示，并要求输入 `UNINSTALL` 二次确认。
-- “手动执行一次采集”没有放进正式菜单，而是作为隐藏调试参数保留。
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh)
+```
 
 ## 文件说明
 
@@ -115,7 +95,7 @@ Linux 宿主机上至少需要：
 - `GeoIP` 不可用时，主功能仍可运行，只是地区过滤不可用。
 - VM 要想看到实例内真实进程，需要实例内 `incus-agent` 正常工作。
 
-## 用法
+## 本地使用
 
 ### 1. 启动交互菜单
 
@@ -123,32 +103,7 @@ Linux 宿主机上至少需要：
 ./incuscheck.sh
 ```
 
-### 2. 一键拉取部署
-
-交互式菜单：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh)
-```
-
-使用默认参数直接安装/覆盖重装：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) install
-```
-
-直接卸载：
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) uninstall
-```
-
-说明：
-
-- `install` 会按默认参数直接安装，也可以用于覆盖重装。
-- `uninstall` 会完整移除本工具自己的程序目录、配置、数据目录和 `systemd` 单元。
-
-### 3. 隐藏调试命令
+### 2. 隐藏调试命令
 
 手动执行一次采集：
 
@@ -162,7 +117,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/inst
 ./incuscheck.sh --debug-status
 ```
 
-### 4. 独立查看历史连接
+### 3. 独立查看历史连接
 
 ```bash
 ./conntrack-report.sh --group-by instance
@@ -171,7 +126,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/inst
 ./conntrack-report.sh --country CN --direction ingress --group-by src
 ```
 
-### 5. 独立进程审查
+### 4. 独立进程审查
 
 ```bash
 ./checklist.sh
@@ -180,16 +135,10 @@ bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/inst
 ./checklist.sh global
 ```
 
-## 当前边界
+## 功能边界
 
 - `conntrack` 是状态快照，不是全流量审计，极短连接可能会漏掉。
 - 当前是“按天原始记录 + 查询时聚合”，还没有单独做日汇总压缩。
 - 进程审查目前是当前视图，不保留进程历史。
 - GeoIP 目前依赖宿主机已有数据库，没有内置下载器。
 
-## 下一步最值得补的方向
-
-1. 增加 GeoIP 数据库自动初始化/更新能力。
-2. 给 IP 统计页加更多快捷视图，例如最近新增来源 IP。
-3. 增加按容器导出历史明细。
-4. 增加安装后自检，例如自动执行一次采集并提示结果。
