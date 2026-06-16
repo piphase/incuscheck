@@ -536,6 +536,7 @@ lookup_country_info() {
 lookup_geo_details() {
     local ip=$1
     local cache_file provider db_path cached cache_line
+    local cached_fields
     local cached_code cached_name cached_region cached_city cached_isp cached_org
     local country_code country_name region_name city_name isp_name org_name
     local api_json parsed
@@ -552,14 +553,14 @@ lookup_geo_details() {
     provider="$(detect_geoip_provider)"
     db_path="$(detect_geoip_db_path 2>/dev/null || true)"
 
-    cache_line="$(awk -F'\t' -v ip="$ip" '$1 == ip { print; exit }' "$cache_file")"
+    cache_line="$(awk -F'\t' -v ip="$ip" '$1 == ip { print NF "\t" $0; exit }' "$cache_file")"
     if [[ -n "$cache_line" ]]; then
-        IFS=$'\t' read -r _ cached_code cached_name cached_region cached_city cached_isp cached_org <<<"$cache_line"
+        IFS=$'\t' read -r cached_fields _ cached_code cached_name cached_region cached_city cached_isp cached_org <<<"$cache_line"
         cached_region="${cached_region:-未知}"
         cached_city="${cached_city:-未知}"
         cached_isp="${cached_isp:-未知}"
         cached_org="${cached_org:-未知}"
-        if [[ "$cached_code" != "UNKNOWN" || "$provider" == "none" ]]; then
+        if [[ "${cached_fields:-0}" -ge 7 ]] && [[ "$cached_code" != "UNKNOWN" || "$provider" == "none" ]]; then
             printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
                 "$cached_code" "$cached_name" "$cached_region" "$cached_city" "$cached_isp" "$cached_org"
             return 0

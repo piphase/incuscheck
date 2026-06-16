@@ -148,7 +148,8 @@ build_filtered_stream() {
         -v instance_filter="$INSTANCE_FILTER" \
         -v country_filter="$COUNTRY_FILTER" \
         -v only_china="$ONLY_MAINLAND_CHINA" \
-        -v since_epoch="$since_epoch" '
+        -v since_epoch="$since_epoch" \
+        -v show_ingress_only="$SHOW_INGRESS_ONLY" '
         function in_csv(value, csv,    n, items, i) {
             if (csv == "") return 1
             n = split(csv, items, ",")
@@ -167,9 +168,10 @@ build_filtered_stream() {
             return epoch + 0
         }
         {
+            if (NF < 17) next
             if (since_epoch > 0 && to_epoch($1) < since_epoch) next
             if (direction_filter != "all" && $4 != direction_filter) next
-            if ("'"$SHOW_INGRESS_ONLY"'" == "true" && $4 != "ingress") next
+            if (show_ingress_only == "true" && $4 != "ingress") next
             if (instance_filter != "" && $2 != instance_filter) next
             if (country_filter != "" && !in_csv($11, country_filter)) next
             if (only_china == "true" && !($4 == "ingress" && $11 == "CN")) next
@@ -181,56 +183,55 @@ print_container_view() {
     local files=("$@")
     build_filtered_stream "${files[@]}" | \
     awk -F'\t' '
-        function flush_section(section_name) {
-            if (section_count[section_name] > 0) {
-                printf "  %s:\n", section_name
-                printf "%s", section_rows[section_name]
+        function add_port(key, port) {
+            token = key SUBSEP port
+            if (port == "" || port == "0") return
+            if (!(token in seen_port)) {
+                seen_port[token] = 1
+                ports[key] = (ports[key] == "" ? port : ports[key] "," port)
             }
-        }
-        function append_row(section_name, row_text) {
-            section_count[section_name]++
-            section_rows[section_name] = section_rows[section_name] row_text
         }
         {
-            instance = $2
-            direction = ($4 == "ingress" ? "入站" : "出站")
-            local_ip = $6
-            local_port = $7
-            remote_ip = $8
-            remote_port = $9
-            country_name = ($12 == "" ? "未知" : $12)
-            region_name = ($13 == "" ? "未知" : $13)
-            city_name = ($14 == "" ? "未知" : $14)
-            isp_name = ($15 == "" ? "未知" : $15)
-            org_name = ($16 == "" ? "未知" : $16)
-            state = ($17 == "" ? "-" : $17)
-            dedup_key = instance "|" direction "|" remote_ip "|" remote_port "|" local_ip "|" local_port "|" country_name "|" region_name "|" city_name "|" isp_name "|" org_name
+            key = $2 SUBSEP $4 SUBSEP $8
+            instance[key] = $2
+            direction[key] = ($4 == "ingress" ? "入站" : "出站")
+            remote_ip[key] = $8
+            country_name[key] = ($12 == "" ? "未知" : $12)
+            region_name[key] = ($13 == "" ? "未知" : $13)
+            city_name[key] = ($14 == "" ? "未知" : $14)
+            isp_name[key] = ($15 == "" ? "未知" : $15)
+            org_name[key] = ($16 == "" ? "未知" : $16)
+            count[key]++
+            if (!(key in first_seen) || $1 < first_seen[key]) first_seen[key] = $1
+            if (!(key in last_seen) || $1 > last_seen[key]) last_seen[key] = $1
 
-            if (seen[dedup_key]++) {
-                next
+            if ($4 == "ingress") {
+                add_port(key, $7)
+            } else {
+                add_port(key, $9)
             }
-
-            if (instance != last_instance) {
-                if (last_instance != "") {
-                    flush_section("入站")
-                    flush_section("出站")
-                    print ""
-                    delete section_rows
-                    delete section_count
-                }
-                printf "容器: %s\n", instance
-                last_instance = instance
-            }
-
-            row = sprintf("    - 远端=%s:%s | 本地=%s:%s | 国家=%s | 省份=%s | 城市=%s | 运营商=%s | 组织=%s | 状态=%s\n",
-                remote_ip, remote_port, local_ip, local_port, country_name, region_name, city_name, isp_name, org_name, state)
-            append_row(direction, row)
         }
         END {
-            if (last_instance != "") {
-                flush_section("入站")
-                flush_section("出站")
+            for (key in count) {
+                print instance[key] "\t" direction[key] "\t" remote_ip[key] "\t" count[key] "\t" ports[key] "\t" \
+                      country_name[key] "\t" region_name[key] "\t" city_name[key] "\t" isp_name[key] "\t" org_name[key] "\t" \
+                      first_seen[key] "\t" last_seen[key]
             }
+        }' | sort -t $'\t' -k1,1 -k2,2 -k4,4nr -k3,3 | \
+    awk -F'\t' '
+        {
+            if ($1 != last_instance) {
+                if (last_instance != "") print ""
+                printf "容器: %s\n", $1
+                last_instance = $1
+                last_direction = ""
+            }
+            if ($2 != last_direction) {
+                printf "  %s:\n", $2
+                last_direction = $2
+            }
+            printf "    - IP=%s | 次数=%s | 相关端口=%s | 国家=%s | 省份=%s | 城市=%s | 运营商=%s | 组织=%s | 首次=%s | 最新=%s\n",
+                $3, $4, ($5 == "" ? "-" : $5), $6, $7, $8, $9, $10, $11, $12
         }'
 }
 
