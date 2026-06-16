@@ -120,7 +120,7 @@ append_row_if_allowed() {
     local remote_port=$8
     local peer_instance=$9
     local state=${10}
-    local country_code country_name geoip_result key
+    local country_code country_name region_name city_name isp_name org_name key
 
     should_capture_direction "$direction" || return
 
@@ -136,8 +136,7 @@ append_row_if_allowed() {
         fi
     fi
 
-    geoip_result="$(lookup_country_info "$remote_ip")"
-    IFS=$'\t' read -r country_code country_name <<<"$geoip_result"
+    IFS=$'\t' read -r country_code country_name region_name city_name isp_name org_name <<<"$(lookup_geo_details "$remote_ip")"
 
     if [[ -n "$INCLUDE_COUNTRY_CODES" && "$(normalize_csv_list "$INCLUDE_COUNTRY_CODES")" != "ALL" ]]; then
         local normalized_includes
@@ -153,7 +152,7 @@ append_row_if_allowed() {
     fi
     SEEN_ROWS["$key"]=1
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$SEEN_AT" \
         "$instance_name" \
         "$instance_type" \
@@ -166,6 +165,10 @@ append_row_if_allowed() {
         "$peer_instance" \
         "$country_code" \
         "$country_name" \
+        "$region_name" \
+        "$city_name" \
+        "$isp_name" \
+        "$org_name" \
         "$state" >> "$OUTPUT_FILE"
 }
 
@@ -235,7 +238,7 @@ materialize_rows() {
 
 flush_history() {
     if [[ ! -f "$HISTORY_FILE" ]]; then
-        printf 'seen_at\tinstance_name\tinstance_type\tdirection\tprotocol\tlocal_ip\tlocal_port\tremote_ip\tremote_port\tpeer_instance\tcountry_code\tcountry_name\tstate\n' > "$HISTORY_FILE"
+        printf 'seen_at\tinstance_name\tinstance_type\tdirection\tprotocol\tlocal_ip\tlocal_port\tremote_ip\tremote_port\tpeer_instance\tcountry_code\tcountry_name\tregion_name\tcity_name\tisp_name\torg_name\tstate\n' > "$HISTORY_FILE"
     fi
 
     if [[ -s "$OUTPUT_FILE" ]]; then

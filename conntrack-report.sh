@@ -21,6 +21,8 @@ ONLY_MAINLAND_CHINA="false"
 SHOW_DETAILS="false"
 SINCE_FILE=""
 TOP_SOURCES="false"
+SHOW_CONTAINER_VIEW="false"
+SHOW_INGRESS_ONLY="false"
 
 usage() {
     cat <<'EOF'
@@ -38,6 +40,8 @@ usage() {
   --details                显示明细而不是聚合
   --since-file PATH        只统计在指定文件修改时间之后新增的记录
   --top-sources            显示来源 IP Top N
+  --container-view         按容器分组列出详细 IP 信息
+  --ingress-only           仅显示入站记录
   -h, --help               查看帮助
 EOF
 }
@@ -84,6 +88,14 @@ while [[ $# -gt 0 ]]; do
             TOP_SOURCES="true"
             shift
             ;;
+        --container-view)
+            SHOW_CONTAINER_VIEW="true"
+            shift
+            ;;
+        --ingress-only)
+            SHOW_INGRESS_ONLY="true"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -117,25 +129,6 @@ PY
     done
 
     printf '%s\n' "${files[@]}"
-}
-
-readable_country_name() {
-    local code=$1
-
-    case "$code" in
-        CN)
-            printf 'China'
-            ;;
-        PRIVATE)
-            printf 'Private'
-            ;;
-        UNKNOWN|"")
-            printf 'Unknown'
-            ;;
-        *)
-            printf '%s' "$code"
-            ;;
-    esac
 }
 
 build_filtered_stream() {
@@ -176,6 +169,7 @@ build_filtered_stream() {
         {
             if (since_epoch > 0 && to_epoch($1) < since_epoch) next
             if (direction_filter != "all" && $4 != direction_filter) next
+            if ("'"$SHOW_INGRESS_ONLY"'" == "true" && $4 != "ingress") next
             if (instance_filter != "" && $2 != instance_filter) next
             if (country_filter != "" && !in_csv($11, country_filter)) next
             if (only_china == "true" && !($4 == "ingress" && $11 == "CN")) next
@@ -183,99 +177,56 @@ build_filtered_stream() {
         }'
 }
 
-print_details() {
+print_container_view() {
     local files=("$@")
-    local tmp
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' RETURN
-
-    printf 'seen_at\tinstance\ttype\tdirection\tproto\tlocal_ip\tlocal_port\tremote_ip\tremote_port\tpeer\tcountry\tstate\n' > "$tmp"
-    build_filtered_stream "${files[@]}" | \
-    awk -F'\t' '{
-        printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s (%s)\t%s\n",
-            $1, $2, $3, $4, $5, $6, $7, $8, $9, ($10 == "" ? "-" : $10), $12, $11, $13
-    }' | sort -r >> "$tmp"
-
-    print_tsv_table "$tmp"
-}
-
-print_aggregate() {
-    local files=("$@")
-    local tmp
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' RETURN
-
-    printf 'group\thits\tinstances\tdirections\tfirst_seen\tlast_seen\n' > "$tmp"
-
-    build_filtered_stream "${files[@]}" | \
-    awk -F'\t' -v mode="$GROUP_BY" '
-        function add_csv(map, key, value) {
-            if (value == "") value = "-"
-            token = SUBSEP key SUBSEP value
-            if (!(token in seen)) {
-                seen[token] = 1
-                map[key] = map[key] "," value
-            }
-        }
-        {
-            if (mode == "instance") group = $2
-            else if (mode == "src") group = $4 == "ingress" ? $8 : $6
-            else if (mode == "dst") group = $4 == "ingress" ? $6 : $8
-            else if (mode == "country") group = $11 == "" ? "UNKNOWN" : $11
-            else group = $2
-
-            count[group]++
-            if (!(group in first_seen) || $1 < first_seen[group]) first_seen[group] = $1
-            if (!(group in last_seen) || $1 > last_seen[group]) last_seen[group] = $1
-            add_csv(instances, group, $2)
-            add_csv(directions, group, $4)
-        }
-        END {
-            for (group in count) {
-                gsub(/^,/, "", instances[group])
-                gsub(/^,/, "", directions[group])
-                print group "\t" count[group] "\t" instances[group] "\t" directions[group] "\t" first_seen[group] "\t" last_seen[group]
-            }
-        }' | sort -t $'\t' -k2,2nr -k6,6r | head -n "$LIMIT" >> "$tmp"
-
-    print_tsv_table "$tmp"
-}
-
-print_top_sources() {
-    local files=("$@")
-    local tmp
-    tmp="$(mktemp)"
-    trap 'rm -f "$tmp"' RETURN
-
-    printf 'source_ip\thits\tinstances\tcountries\tfirst_seen\tlast_seen\n' > "$tmp"
-
     build_filtered_stream "${files[@]}" | \
     awk -F'\t' '
-        function add_csv(map, key, value) {
-            if (value == "") value = "-"
-            token = SUBSEP key SUBSEP value
-            if (!(token in seen)) {
-                seen[token] = 1
-                map[key] = map[key] "," value
+        function flush_section(section_name) {
+            if (section_count[section_name] > 0) {
+                printf "  %s:\n", section_name
+                printf "%s", section_rows[section_name]
             }
+        }
+        function append_row(section_name, row_text) {
+            section_count[section_name]++
+            section_rows[section_name] = section_rows[section_name] row_text
         }
         {
-            source = ($4 == "ingress" ? $8 : $8)
-            count[source]++
-            if (!(source in first_seen) || $1 < first_seen[source]) first_seen[source] = $1
-            if (!(source in last_seen) || $1 > last_seen[source]) last_seen[source] = $1
-            add_csv(instances, source, $2)
-            add_csv(countries, source, $11)
+            instance = $2
+            direction = ($4 == "ingress" ? "入站" : "出站")
+            local_ip = $6
+            local_port = $7
+            remote_ip = $8
+            remote_port = $9
+            country_name = ($12 == "" ? "未知" : $12)
+            region_name = ($13 == "" ? "未知" : $13)
+            city_name = ($14 == "" ? "未知" : $14)
+            isp_name = ($15 == "" ? "未知" : $15)
+            org_name = ($16 == "" ? "未知" : $16)
+            state = ($17 == "" ? "-" : $17)
+
+            if (instance != last_instance) {
+                if (last_instance != "") {
+                    flush_section("入站")
+                    flush_section("出站")
+                    print ""
+                    delete section_rows
+                    delete section_count
+                }
+                printf "容器: %s\n", instance
+                last_instance = instance
+            }
+
+            row = sprintf("    - 远端=%s:%s | 本地=%s:%s | 国家=%s | 省份=%s | 城市=%s | 运营商=%s | 组织=%s | 状态=%s\n",
+                remote_ip, remote_port, local_ip, local_port, country_name, region_name, city_name, isp_name, org_name, state)
+            append_row(direction, row)
         }
         END {
-            for (source in count) {
-                gsub(/^,/, "", instances[source])
-                gsub(/^,/, "", countries[source])
-                print source "\t" count[source] "\t" instances[source] "\t" countries[source] "\t" first_seen[source] "\t" last_seen[source]
+            if (last_instance != "") {
+                flush_section("入站")
+                flush_section("出站")
             }
-        }' | sort -t $'\t' -k2,2nr -k6,6r | head -n "$LIMIT" >> "$tmp"
-
-    print_tsv_table "$tmp"
+        }'
 }
 
 mapfile -t files < <(collect_recent_files "$DAYS")
@@ -305,10 +256,8 @@ if [[ "${filtered_count:-0}" -eq 0 ]]; then
     exit 0
 fi
 
-if [[ "$SHOW_DETAILS" == "true" ]]; then
-    print_details "${files[@]}"
-elif [[ "$TOP_SOURCES" == "true" ]]; then
-    print_top_sources "${files[@]}"
+if [[ "$SHOW_CONTAINER_VIEW" == "true" ]]; then
+    print_container_view "${files[@]}"
 else
-    print_aggregate "${files[@]}"
+    print_container_view "${files[@]}"
 fi

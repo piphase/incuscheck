@@ -54,6 +54,8 @@ INCUS_BIN="${INCUS_BIN:-incus}"
 CONNTRACK_BIN="${CONNTRACK_BIN:-conntrack}"
 JQ_BIN="${JQ_BIN:-jq}"
 PYTHON_BIN="${PYTHON_BIN:-python3}"
+CURL_BIN="${CURL_BIN:-curl}"
+WGET_BIN="${WGET_BIN:-wget}"
 MMDBLOOKUP_BIN="${MMDBLOOKUP_BIN:-mmdblookup}"
 GEOIPLOOKUP_BIN="${GEOIPLOOKUP_BIN:-geoiplookup}"
 SYSTEMCTL_BIN="${SYSTEMCTL_BIN:-systemctl}"
@@ -444,6 +446,22 @@ geoip_cache_file() {
     printf '%s/geoip-cache.tsv\n' "$CACHE_DIR"
 }
 
+http_fetch() {
+    local url=$1
+
+    if command -v "$CURL_BIN" >/dev/null 2>&1; then
+        "$CURL_BIN" -fsSL --max-time 8 "$url"
+        return
+    fi
+
+    if command -v "$WGET_BIN" >/dev/null 2>&1; then
+        "$WGET_BIN" -qO- --timeout=8 "$url"
+        return
+    fi
+
+    return 1
+}
+
 detect_geoip_db_path() {
     local candidate
 
@@ -510,64 +528,109 @@ geoip_status_text() {
 }
 
 lookup_country_info() {
+    local details
+    details="$(lookup_geo_details "$1")"
+    printf '%s\n' "$details" | awk -F'\t' '{ print $1 "\t" $2 }'
+}
+
+lookup_geo_details() {
     local ip=$1
-    local cache_file provider db_path cached cache_line cached_code cached_name country_code country_name
+    local cache_file provider db_path cached cache_line
+    local cached_code cached_name cached_region cached_city cached_isp cached_org
+    local country_code country_name region_name city_name isp_name org_name
+    local api_json parsed
 
     ensure_dirs
     cache_file="$(geoip_cache_file)"
     touch "$cache_file"
 
     if is_non_public_ip "$ip"; then
-        printf 'PRIVATE\tPrivate\n'
+        printf 'PRIVATE\tPrivate\t局域网\t-\t本地网络\t-\n'
         return 0
     fi
 
     provider="$(detect_geoip_provider)"
     db_path="$(detect_geoip_db_path 2>/dev/null || true)"
 
-    cache_line="$(awk -F'\t' -v ip="$ip" '$1 == ip { print $2 "\t" $3; exit }' "$cache_file")"
+    cache_line="$(awk -F'\t' -v ip="$ip" '$1 == ip { print; exit }' "$cache_file")"
     if [[ -n "$cache_line" ]]; then
-        IFS=$'\t' read -r cached_code cached_name <<<"$cache_line"
+        IFS=$'\t' read -r _ cached_code cached_name cached_region cached_city cached_isp cached_org <<<"$cache_line"
+        cached_region="${cached_region:-未知}"
+        cached_city="${cached_city:-未知}"
+        cached_isp="${cached_isp:-未知}"
+        cached_org="${cached_org:-未知}"
         if [[ "$cached_code" != "UNKNOWN" || "$provider" == "none" ]]; then
-            printf '%s\n' "$cache_line"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$cached_code" "$cached_name" "$cached_region" "$cached_city" "$cached_isp" "$cached_org"
             return 0
         fi
     fi
 
     country_code="UNKNOWN"
     country_name="Unknown"
+    region_name="未知"
+    city_name="未知"
+    isp_name="未知"
+    org_name="未知"
 
-    case "$provider" in
-        mmdb)
-            cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" country iso_code 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-            if [[ -n "$cached" ]]; then
-                country_code="$cached"
-            else
-                cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" registered_country iso_code 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-                [[ -n "$cached" ]] && country_code="$cached"
-            fi
+    api_json="$(http_fetch "http://ip-api.com/json/${ip}?lang=zh-CN&fields=status,country,countryCode,regionName,city,isp,org,query" 2>/dev/null || true)"
+    if [[ -n "$api_json" ]]; then
+        parsed="$(IP_JSON="$api_json" "$PYTHON_BIN" - <<'PY'
+import json
+import os
 
-            cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" country names en 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
-            if [[ -n "$cached" ]]; then
-                country_name="$cached"
-            elif [[ "$country_code" != "UNKNOWN" ]]; then
-                country_name="$country_code"
-            fi
-            ;;
-        legacy)
-            cached="$("$GEOIPLOOKUP_BIN" "$ip" 2>/dev/null | sed 's/^.*: *//')"
-            if [[ -n "$cached" && "$cached" != "IP Address not found" ]]; then
-                country_code="$(printf '%s' "$cached" | awk -F',' '{print $1}' | tr -d ' ')"
-                country_name="$(printf '%s' "$cached" | awk -F', ' '{print $2}')"
-                [[ -z "$country_name" ]] && country_name="$country_code"
-            fi
-            ;;
-    esac
+data = json.loads(os.environ["IP_JSON"])
+if data.get("status") == "success":
+    print("\t".join([
+        data.get("countryCode") or "UNKNOWN",
+        data.get("country") or "Unknown",
+        data.get("regionName") or "未知",
+        data.get("city") or "未知",
+        data.get("isp") or "未知",
+        data.get("org") or "未知",
+    ]))
+PY
+)" || true
+        if [[ -n "$parsed" ]]; then
+            IFS=$'\t' read -r country_code country_name region_name city_name isp_name org_name <<<"$parsed"
+        fi
+    fi
+
+    if [[ "$country_code" == "UNKNOWN" ]]; then
+        case "$provider" in
+            mmdb)
+                cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" country iso_code 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                if [[ -n "$cached" ]]; then
+                    country_code="$cached"
+                else
+                    cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" registered_country iso_code 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                    [[ -n "$cached" ]] && country_code="$cached"
+                fi
+
+                cached="$("$MMDBLOOKUP_BIN" --file "$db_path" --ip "$ip" country names en 2>/dev/null | sed -n 's/.*"\\([^"]*\\)".*/\\1/p' | head -n 1)"
+                if [[ -n "$cached" ]]; then
+                    country_name="$cached"
+                elif [[ "$country_code" != "UNKNOWN" ]]; then
+                    country_name="$country_code"
+                fi
+                ;;
+            legacy)
+                cached="$("$GEOIPLOOKUP_BIN" "$ip" 2>/dev/null | sed 's/^.*: *//')"
+                if [[ -n "$cached" && "$cached" != "IP Address not found" ]]; then
+                    country_code="$(printf '%s' "$cached" | awk -F',' '{print $1}' | tr -d ' ')"
+                    country_name="$(printf '%s' "$cached" | awk -F', ' '{print $2}')"
+                    [[ -z "$country_name" ]] && country_name="$country_code"
+                fi
+                ;;
+        esac
+    fi
 
     awk -F'\t' -v ip="$ip" '$1 != ip { print }' "$cache_file" > "$cache_file.tmp"
     mv "$cache_file.tmp" "$cache_file"
-    printf '%s\t%s\t%s\n' "$ip" "$country_code" "$country_name" >> "$cache_file"
-    printf '%s\t%s\n' "$country_code" "$country_name"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$ip" "$country_code" "$country_name" "$region_name" "$city_name" "$isp_name" "$org_name" >> "$cache_file"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$country_code" "$country_name" "$region_name" "$city_name" "$isp_name" "$org_name"
 }
 
 write_config_file() {

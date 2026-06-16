@@ -269,96 +269,63 @@ run_report_shortcut() {
     local active_config
     active_config="$(config_env_prefix)"
     case "$mode" in
-        china_ingress)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --china-ingress --group-by src --limit 50
+        all_ips)
+            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --container-view --days "$DEFAULT_REPORT_DAYS" --limit 500
             ;;
-        china_ingress_by_instance)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --china-ingress --direction ingress --group-by instance --limit 50
+        china_ips)
+            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --container-view --country CN --days "$DEFAULT_REPORT_DAYS" --limit 500
             ;;
-        instance_summary)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --group-by instance --limit 50
+        ingress_only)
+            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --container-view --direction ingress --ingress-only --days "$DEFAULT_REPORT_DAYS" --limit 500
             ;;
-        source_summary)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --group-by src --limit 50
-            ;;
-        top_sources)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --top-sources --limit 20
-            ;;
-        destination_summary)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --group-by dst --limit 50
-            ;;
-        details)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --details --limit 100
+        china_ingress_only)
+            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --container-view --china-ingress --direction ingress --ingress-only --days "$DEFAULT_REPORT_DAYS" --limit 500
             ;;
     esac
 }
 
 show_ip_statistics() {
-    local choice instance_name days_input country_code direction_input marker_file
+    local choice
     local active_config
     active_config="$(config_env_prefix)"
 
-    print_header
-    echo "${BOLD}IP 统计数据${RESET}"
-    echo "1. 按容器聚合"
-    echo "2. 按来源 IP 聚合"
-    echo "3. 按目标 IP 聚合"
-    echo "4. 只看中国大陆入站来源"
-    echo "5. 按容器查看中国大陆入站"
-    echo "6. 最近新增中国大陆来源"
-    echo "7. 来源 IP Top N"
-    echo "8. 查看指定容器明细"
-    echo "9. 自定义国家/地区过滤"
-    echo "0. 返回"
-    echo "------------------------------------------------------"
-    read -r -p "请选择: " choice
+    while true; do
+        print_header
+        echo "${BOLD}IP 统计数据${RESET}"
+        echo "1. 展示全部 IP 信息(入站+出站)"
+        echo "2. 仅展示中国 IP(入站+出站)"
+        echo "3. 仅展示入站 IP"
+        echo "4. 仅展示入站的中国大陆 IP"
+        echo "0. 返回"
+        echo "------------------------------------------------------"
+        read -r -p "请选择: " choice
 
-    case "$choice" in
-        1)
-            run_report_shortcut instance_summary
-            ;;
-        2)
-            run_report_shortcut source_summary
-            ;;
-        3)
-            run_report_shortcut destination_summary
-            ;;
-        4)
-            run_report_shortcut china_ingress
-            ;;
-        5)
-            run_report_shortcut china_ingress_by_instance
-            ;;
-        6)
-            marker_file="$(report_marker_file china_ingress_recent)"
-            if [[ -f "$marker_file" ]]; then
-                INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --china-ingress --since-file "$marker_file" --group-by src --limit 50
-            else
-                INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --china-ingress --group-by src --limit 50
-            fi
-            touch "$marker_file"
-            ;;
-        7)
-            run_report_shortcut top_sources
-            ;;
-        8)
-            instance_name="$(prompt '输入实例名')"
-            days_input="$(prompt '查看最近几天' "$DEFAULT_REPORT_DAYS")"
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --details --instance "$instance_name" --days "$days_input" --limit 200
-            ;;
-        9)
-            country_code="$(normalize_csv_list "$(prompt '输入国家/地区代码，例如 CN,US')")"
-            direction_input="$(direction_value_from_input "$(prompt '方向(全部/仅入站/仅出站)' '全部')")" \
-                || die "方向必须填写 全部 / 仅入站 / 仅出站"
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-report.sh" --country "$country_code" --direction "$direction_input" --group-by src --limit 100
-            ;;
-        0)
-            return
-            ;;
-        *)
-            warn "无效选择"
-            ;;
-    esac
+        case "$choice" in
+            1)
+                run_report_shortcut all_ips
+                pause_screen
+                ;;
+            2)
+                run_report_shortcut china_ips
+                pause_screen
+                ;;
+            3)
+                run_report_shortcut ingress_only
+                pause_screen
+                ;;
+            4)
+                run_report_shortcut china_ingress_only
+                pause_screen
+                ;;
+            0)
+                return
+                ;;
+            *)
+                warn "无效选择"
+                pause_screen
+                ;;
+        esac
+    done
 }
 
 show_process_review() {
@@ -379,7 +346,7 @@ show_process_review() {
             INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/checklist.sh" global
             ;;
         2)
-            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/checklist.sh" all
+            INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/checklist.sh" instances
             ;;
         0)
             return
