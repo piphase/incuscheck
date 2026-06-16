@@ -137,6 +137,7 @@ install_runtime_files() {
         "$INSTALL_DIR/incuscheck.sh" \
         "$INSTALL_DIR/lib/common.sh"
     ln -sf "$INSTALL_DIR/incuscheck.sh" "$BIN_LINK_PATH"
+    ln -sf "$INSTALL_DIR/incuscheck.sh" "$BIN_ALIAS_PATH"
 }
 
 apply_system_data_defaults() {
@@ -174,11 +175,18 @@ perform_install() {
     "$SYSTEMCTL_BIN" enable --now "$TIMER_NAME"
     "$SYSTEMCTL_BIN" start "$TIMER_NAME"
 
+    if env INCUSCHECK_CONFIG="$SYSTEM_CONFIG_FILE" "$INSTALL_DIR/conntrack-capture.sh" >/dev/null 2>&1; then
+        echo "${GREEN}已完成一次初始采集。${RESET}"
+    else
+        echo "${YELLOW}初始采集未成功，可稍后手动执行 ic --run-once。${RESET}"
+    fi
+
     echo
     echo "${GREEN}安装/重装完成。${RESET}"
     echo "状态: $(status_text)"
     echo "程序目录: $INSTALL_DIR"
     echo "命令入口: $BIN_LINK_PATH"
+    echo "快捷命令: $BIN_ALIAS_PATH"
     if command -v "$JQ_BIN" >/dev/null 2>&1; then
         echo "可选依赖 jq: 已安装"
     else
@@ -223,6 +231,7 @@ show_status() {
     echo "配置文件: ${ACTIVE_CONFIG_FILE:-$SYSTEM_CONFIG_FILE}"
     echo "安装目录: $INSTALL_DIR"
     echo "命令入口: $BIN_LINK_PATH"
+    echo "快捷命令: $BIN_ALIAS_PATH"
     echo "------------------------------------------------------"
 
     if service_unit_installed; then
@@ -513,7 +522,7 @@ uninstall_everything() {
         "$SYSTEMCTL_BIN" daemon-reload
     fi
 
-    rm -f "$SYSTEM_CONFIG_FILE" "$BIN_LINK_PATH"
+    rm -f "$SYSTEM_CONFIG_FILE" "$BIN_LINK_PATH" "$BIN_ALIAS_PATH"
     rmdir "$SYSTEM_CONFIG_DIR" 2>/dev/null || true
     rm -rf "$INSTALL_DIR"
     rm -rf "$DATA_DIR"

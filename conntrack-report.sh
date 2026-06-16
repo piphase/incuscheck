@@ -284,6 +284,8 @@ if [[ ${#files[@]} -eq 0 ]]; then
     die "最近 $DAYS 天没有可用历史数据。"
 fi
 
+filtered_count="$(build_filtered_stream "${files[@]}" | wc -l | tr -d ' ')"
+
 echo "📊 IP 统计数据"
 echo "时间范围: 最近 $DAYS 天"
 echo "方向过滤: $DIRECTION"
@@ -296,6 +298,12 @@ else
     echo "地区过滤: 全部"
 fi
 echo "------------------------------------------------------"
+
+if [[ "${filtered_count:-0}" -eq 0 ]]; then
+    echo "当前没有符合条件的历史记录。"
+    echo "如果刚安装完成，请先等待定时采集，或执行 ic --run-once 后再查看。"
+    exit 0
+fi
 
 if [[ "$SHOW_DETAILS" == "true" ]]; then
     print_details "${files[@]}"

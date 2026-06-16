@@ -42,6 +42,7 @@ bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/inst
 
 - `install` 会按默认参数直接安装，也可以用于覆盖重装。
 - `uninstall` 会完整移除本工具自己的程序目录、配置、数据目录和 `systemd` 单元。
+- 安装完成后可直接输入 `ic` 打开管理界面。
 
 ## 主菜单
 
