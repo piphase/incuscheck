@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# 安装目录与命令入口
+INSTALL_DIR="/opt/incuscheck"
+BIN_LINK_PATH="/usr/local/bin/incuscheck"
+
+# 数据目录
+DATA_DIR="/var/lib/incuscheck"
+
+# 采集策略
+CAPTURE_INTERVAL_MINUTES="2"
+CAPTURE_DIRECTION="all"
+RETENTION_DAYS="30"
+
+# 过滤规则
+EXCLUDE_SRC_CIDRS=""
+EXCLUDE_DST_CIDRS=""
+EXCLUDE_COUNTRY_CODES=""
+
+# Incus project
+INCUS_PROJECT=""
+
+# GeoIP
+GEOIP_ENABLED="auto"
+GEOIP_DB_PATH=""
+
+# 查询默认值
+DEFAULT_REPORT_DAYS="7"
+DEFAULT_REPORT_LIMIT="30"
