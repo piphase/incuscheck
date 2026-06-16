@@ -157,15 +157,6 @@ fi
     echo "🔍 全局进程视图: 统计进程出现次数和分布实例"
     echo "------------------------------------------------------"
 
-    while IFS= read -r proc_name; do
-        printf '0_Host\t%s\n' "$proc_name" >> "$tmp_file"
-    done < <(
-        ps -eo comm= | \
-        sed 's/^ *//; s/ *$//' | \
-        awk 'NF > 0 { print }' | \
-        grep -vE "^($PROCESS_IGNORE_REGEX)$" || true
-    )
-
     mapfile -t running_instances < <(incus_running_instances_tsv)
 
     local row instance_name instance_type output filtered
@@ -206,24 +197,20 @@ fi
             instance = $1
             total_count[proc]++
             mark_instance(proc, instance)
-            if (instance == "0_Host") {
-                host_seen[proc] = "yes"
-            }
         }
         END {
             for (proc in total_count) {
-                host_text = (host_seen[proc] == "yes" ? "yes" : "no")
-                print proc "\t" total_count[proc] "\t" instance_count[proc] "\t" host_text
+                print proc "\t" total_count[proc] "\t" instance_count[proc]
             }
         }
     ' "$tmp_file" | sort -t $'\t' -k2,2nr -k3,3nr | \
     awk -F'\t' '
         BEGIN {
-            printf "%-24s %-8s %-10s %-8s\n", "进程名", "次数", "实例数", "宿主机"
-            printf "%-24s %-8s %-10s %-8s\n", "------------------------", "--------", "----------", "--------"
+            printf "%-24s %-8s %-10s\n", "进程名", "次数", "实例数"
+            printf "%-24s %-8s %-10s\n", "------------------------", "--------", "----------"
         }
         {
-            printf "%-24s %-8s %-10s %-8s\n", $1, $2, $3, $4
+            printf "%-24s %-8s %-10s\n", $1, $2, $3
         }
     '
 
