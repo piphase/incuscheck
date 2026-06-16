@@ -204,6 +204,11 @@ print_container_view() {
             isp_name = ($15 == "" ? "未知" : $15)
             org_name = ($16 == "" ? "未知" : $16)
             state = ($17 == "" ? "-" : $17)
+            dedup_key = instance "|" direction "|" remote_ip "|" remote_port "|" local_ip "|" local_port "|" country_name "|" region_name "|" city_name "|" isp_name "|" org_name
+
+            if (seen[dedup_key]++) {
+                next
+            }
 
             if (instance != last_instance) {
                 if (last_instance != "") {

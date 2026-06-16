@@ -152,7 +152,7 @@ append_row_if_allowed() {
     fi
     SEEN_ROWS["$key"]=1
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$SEEN_AT" \
         "$instance_name" \
         "$instance_type" \
