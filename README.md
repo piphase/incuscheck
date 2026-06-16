@@ -123,7 +123,27 @@ Linux 宿主机上至少需要：
 ./incuscheck.sh
 ```
 
-### 2. 隐藏调试命令
+### 2. 一键拉取部署
+
+交互式菜单：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh)
+```
+
+使用默认参数直接安装/覆盖重装：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) install
+```
+
+直接卸载：
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) uninstall
+```
+
+### 3. 隐藏调试命令
 
 手动执行一次采集：
 
@@ -137,7 +157,7 @@ Linux 宿主机上至少需要：
 ./incuscheck.sh --debug-status
 ```
 
-### 3. 独立查看历史连接
+### 4. 独立查看历史连接
 
 ```bash
 ./conntrack-report.sh --group-by instance
@@ -146,7 +166,7 @@ Linux 宿主机上至少需要：
 ./conntrack-report.sh --country CN --direction ingress --group-by src
 ```
 
-### 4. 独立进程审查
+### 5. 独立进程审查
 
 ```bash
 ./checklist.sh

@@ -113,31 +113,9 @@ install_runtime_files() {
     ln -sf "$INSTALL_DIR/incuscheck.sh" "$BIN_LINK_PATH"
 }
 
-install_or_reinstall() {
-    require_linux
-    require_systemd
-    ensure_dirs
-
-    echo "准备安装/重装自动 IP 记录。"
-
-    CAPTURE_INTERVAL_MINUTES="$(prompt '采集间隔(分钟)' "$CAPTURE_INTERVAL_MINUTES")"
-    [[ "$CAPTURE_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || die "采集间隔必须是数字"
-
-    CAPTURE_DIRECTION="$(trim_spaces "$(prompt '记录方向(all/ingress/egress)' "$CAPTURE_DIRECTION")")"
-    case "$CAPTURE_DIRECTION" in
-        all|ingress|egress) ;;
-        *) die "记录方向必须是 all/ingress/egress" ;;
-    esac
-
-    RETENTION_DAYS="$(prompt '保留天数' "$RETENTION_DAYS")"
-    [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "保留天数必须是数字"
-
-    EXCLUDE_SRC_CIDRS="$(trim_spaces "$(prompt '排除来源 CIDR(逗号分隔，可留空)' "$EXCLUDE_SRC_CIDRS")")"
-    EXCLUDE_DST_CIDRS="$(trim_spaces "$(prompt '排除目标 CIDR(逗号分隔，可留空)' "$EXCLUDE_DST_CIDRS")")"
-    EXCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '排除国家/地区代码(逗号分隔，可留空)' "$EXCLUDE_COUNTRY_CODES")")"
-    INCUS_PROJECT="$(trim_spaces "$(prompt 'Incus project(留空表示默认/全部可见范围)' "$INCUS_PROJECT")")"
-
+apply_system_data_defaults() {
     require_root
+
     if [[ "$DATA_DIR" == "$PROJECT_ROOT/data" ]]; then
         DATA_DIR="/var/lib/incuscheck"
         HISTORY_DIR="$DATA_DIR/history"
@@ -145,6 +123,13 @@ install_or_reinstall() {
         RUNTIME_DIR="$DATA_DIR/runtime"
         LOG_DIR="$DATA_DIR/logs"
     fi
+}
+
+perform_install() {
+    require_linux
+    require_systemd
+    ensure_dirs
+    apply_system_data_defaults
     ensure_commands_installed "$INCUS_BIN" "$CONNTRACK_BIN" "$PYTHON_BIN" "$JQ_BIN"
 
     if ensure_geoip_ready; then
@@ -174,6 +159,33 @@ install_or_reinstall() {
         echo "可选依赖 jq: 未安装"
     fi
     echo "GeoIP 状态: $(geoip_status_text)"
+}
+
+install_or_reinstall() {
+    require_linux
+    require_systemd
+    ensure_dirs
+
+    echo "准备安装/重装自动 IP 记录。"
+
+    CAPTURE_INTERVAL_MINUTES="$(prompt '采集间隔(分钟)' "$CAPTURE_INTERVAL_MINUTES")"
+    [[ "$CAPTURE_INTERVAL_MINUTES" =~ ^[0-9]+$ ]] || die "采集间隔必须是数字"
+
+    CAPTURE_DIRECTION="$(trim_spaces "$(prompt '记录方向(all/ingress/egress)' "$CAPTURE_DIRECTION")")"
+    case "$CAPTURE_DIRECTION" in
+        all|ingress|egress) ;;
+        *) die "记录方向必须是 all/ingress/egress" ;;
+    esac
+
+    RETENTION_DAYS="$(prompt '保留天数' "$RETENTION_DAYS")"
+    [[ "$RETENTION_DAYS" =~ ^[0-9]+$ ]] || die "保留天数必须是数字"
+
+    EXCLUDE_SRC_CIDRS="$(trim_spaces "$(prompt '排除来源 CIDR(逗号分隔，可留空)' "$EXCLUDE_SRC_CIDRS")")"
+    EXCLUDE_DST_CIDRS="$(trim_spaces "$(prompt '排除目标 CIDR(逗号分隔，可留空)' "$EXCLUDE_DST_CIDRS")")"
+    EXCLUDE_COUNTRY_CODES="$(normalize_csv_list "$(prompt '排除国家/地区代码(逗号分隔，可留空)' "$EXCLUDE_COUNTRY_CODES")")"
+    INCUS_PROJECT="$(trim_spaces "$(prompt 'Incus project(留空表示默认/全部可见范围)' "$INCUS_PROJECT")")"
+
+    perform_install
 }
 
 show_status() {
@@ -447,6 +459,8 @@ modify_config() {
 }
 
 uninstall_everything() {
+    local force_mode=${1:-false}
+
     require_linux
     require_systemd
 
@@ -456,11 +470,13 @@ uninstall_everything() {
     echo "不会卸载系统依赖，也不会修改 Incus 本身配置。"
     echo "------------------------------------------------------"
 
-    local confirm
-    confirm="$(prompt '请输入 UNINSTALL 以确认')"
-    if [[ "$confirm" != "UNINSTALL" ]]; then
-        echo "已取消。"
-        return
+    if [[ "$force_mode" != "true" ]]; then
+        local confirm
+        confirm="$(prompt '请输入 UNINSTALL 以确认')"
+        if [[ "$confirm" != "UNINSTALL" ]]; then
+            echo "已取消。"
+            return
+        fi
     fi
 
     require_root
@@ -484,11 +500,19 @@ handle_hidden_command() {
     local active_config
     active_config="$(config_env_prefix)"
     case "${1:-}" in
+        --install-defaults)
+            perform_install
+            exit 0
+            ;;
         --run-once)
             exec env INCUSCHECK_CONFIG="$active_config" "$PROJECT_ROOT/conntrack-capture.sh"
             ;;
         --debug-status)
             show_status
+            exit 0
+            ;;
+        --uninstall-force)
+            uninstall_everything true
             exit 0
             ;;
     esac
