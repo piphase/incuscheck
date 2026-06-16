@@ -143,6 +143,11 @@ bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/inst
 bash <(curl -fsSL https://raw.githubusercontent.com/piphase/incuscheck/main/install.sh) uninstall
 ```
 
+说明：
+
+- `install` 会按默认参数直接安装，也可以用于覆盖重装。
+- `uninstall` 会完整移除本工具自己的程序目录、配置、数据目录和 `systemd` 单元。
+
 ### 3. 隐藏调试命令
 
 手动执行一次采集：
